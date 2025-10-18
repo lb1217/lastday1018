@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  NPS_SERVER: "your.nps.server:port"
-  NPS_VKEY: "your-vkey-here"
+  NPS_SERVER: ${{ secrets.NPS_SERVER }}
+  NPS_VKEY: ${{ secrets.NPS_VKEY }}
 
 jobs:
   secure-rdp-nps:
@@ -132,8 +132,9 @@ jobs:
           Write-Host "[OK] File size: $($npcInfo.Length) bytes, Created: $($npcInfo.CreationTime)"
           
           Write-Host "Starting NPS client in background..."
-          Write-Host "NPS Server: (configured in env)"
-          Write-Host "Command: $npcPath -server=$npsServer -vkey=*** -type=tcp"
+          Write-Host "NPS Server: (configured via secrets)"
+          Write-Host "VKey: (configured via secrets)"
+          Write-Host "Type: tcp"
           
           # Start NPS client in background
           Try {
@@ -158,12 +159,21 @@ jobs:
           if ($npcProcess) {
               Write-Host "[OK] NPS client is running (PID: $($npcProcess.Id), CPU: $($npcProcess.CPU), Memory: $($npcProcess.WorkingSet / 1MB) MB)"
           } else {
-              Write-Error "[FAILED] NPC client process has terminated"
+              Write-Error "[FAILED] NPC client process has terminated immediately"
               Write-Host "==================== NPC OUTPUT LOG ===================="
-              Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+              if (Test-Path "$env:TEMP\npc.log") {
+                  Get-Content "$env:TEMP\npc.log" | ForEach-Object { Write-Host $_ }
+              } else {
+                  Write-Host "(no output log file)"
+              }
               Write-Host "===================== NPC ERROR LOG ====================="
-              Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+              if (Test-Path "$env:TEMP\npc_error.log") {
+                  Get-Content "$env:TEMP\npc_error.log" | ForEach-Object { Write-Host $_ }
+              } else {
+                  Write-Host "(no error log file)"
+              }
               Write-Host "======================================================"
+              Write-Host "Troubleshooting: Verify NPS_SERVER and NPS_VKEY secrets are set correctly"
               exit 1
           }
           Write-Host "[STEP 3 COMPLETE] NPS client started successfully"

@@ -33,6 +33,17 @@ env:
 
 ## 使用方法
 
+### 步骤 1: 配置 GitHub Secrets
+
+1. 转到 GitHub 仓库
+2. 进入 **Settings** → **Secrets and variables** → **Actions**
+3. 点击 **New repository secret**
+4. 添加以下罢密：
+   - **Name:** `NPS_SERVER` | **Value:** `your.nps.server:port` （例：`nps.aitmc.cn:50001`）
+   - **Name:** `NPS_VKEY` | **Value:** `your-vkey-here` （例：`yongning0617win`）
+
+### 步骤 2: 运行工作流
+
 1. 将此仓库推送到 GitHub
 2. 在 GitHub 仓库中启用 Actions
 3. 手动触发工作流：
