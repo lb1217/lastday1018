@@ -102,8 +102,10 @@ jobs:
           Write-Host "[OK] Added to Remote Desktop Users"
           
           Write-Host "Storing password in environment variable..."
-          echo "RDP_CREDS=$password" >> $env:GITHUB_ENV
+          # Save to GITHUB_ENV for next steps - use AppendContent instead
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password" -Encoding utf8
           Write-Host "[OK] Password saved to RDP_CREDS"
+          Write-Host "Verifying written value: $password"
           
           Write-Host "Verifying user creation..."
           if (-not (Get-LocalUser -Name "RDP")) {
@@ -146,7 +148,8 @@ jobs:
                 -ArgumentList "-server=$npsServer", "-vkey=$vkey", "-type=tcp" `
                 -WindowStyle Hidden -PassThru -ErrorAction Stop
               Write-Host "[OK] NPC process started with PID: $($process.Id)"
-              echo "NPC_PID=$($process.Id)" >> $env:GITHUB_ENV
+          # Save to GITHUB_ENV for next steps - use AppendContent instead
+          Add-Content -Path $env:GITHUB_ENV -Value "NPC_PID=$($process.Id)" -Encoding utf8
           } Catch {
               Write-Error "[FAILED] Failed to start NPC process: $_"
               exit 1
