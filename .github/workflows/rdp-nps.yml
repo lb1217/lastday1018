@@ -213,13 +213,27 @@ jobs:
 
       - name: Maintain Connection
         run: |
+          # Read RDP_CREDS from GITHUB_ENV file
+          $rdpCreds = $null
+          if (Test-Path $env:GITHUB_ENV) {
+              $envContent = Get-Content $env:GITHUB_ENV
+              $rdpLine = $envContent | Where-Object { $_ -like "RDP_CREDS=*" }
+              if ($rdpLine) {
+                  $rdpCreds = $rdpLine -replace "RDP_CREDS=", ""
+              }
+          }
+          
+          if (-not $rdpCreds) {
+              $rdpCreds = "[ERROR: Password not found]"
+          }
+          
           Write-Host "`n=========================================="
           Write-Host "RDP-NPS TUNNEL ACTIVE"
           Write-Host "=========================================="
           Write-Host "Local RDP Port: 3389"
           Write-Host "`nRDP Credentials:"
           Write-Host "Username: RDP"
-          Write-Host "Password: $env:RDP_CREDS"
+          Write-Host "Password: $rdpCreds"
           Write-Host "=========================================="
           Write-Host "Access via NPS Web UI:"
           Write-Host "1. Log in to NPS Web UI"
