@@ -63,23 +63,10 @@ jobs:
         run: |
           Write-Host "[STEP 2] Creating RDP User with Secure Password..."
           
-          Write-Host "Generating secure password..."
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          Write-Host "Setting fixed password..."
+          $password = "aitmc@111"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          Write-Host "[OK] Password generated (16 characters)"
+          Write-Host "[OK] Password set to: $password"
           
           # Check if user already exists
           Write-Host "Checking if RDP user exists..."
