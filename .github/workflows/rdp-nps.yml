@@ -18,27 +18,48 @@ jobs:
 
       - name: Configure Core RDP Settings
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          Write-Host "[STEP 1] Configuring Core RDP Settings..."
+          
+          # Enable Remote Desktop
+          Write-Host "Setting fDenyTSConnections to 0..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
+                             -Name "fDenyTSConnections" -Value 0 -Force -ErrorAction Stop
+          Write-Host "[OK] fDenyTSConnections set"
+          
+          # Disable NLA
+          Write-Host "Setting UserAuthentication to 0..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
+                             -Name "UserAuthentication" -Value 0 -Force -ErrorAction Stop
+          Write-Host "[OK] UserAuthentication set"
+          
+          # Set SecurityLayer
+          Write-Host "Setting SecurityLayer to 0..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
+                             -Name "SecurityLayer" -Value 0 -Force -ErrorAction Stop
+          Write-Host "[OK] SecurityLayer set"
 
           # Remove any existing rule with the same name to avoid duplication
+          Write-Host "Removing existing RDP-NPS firewall rule..."
           netsh advfirewall firewall delete rule name="RDP-NPS" 2>$null
+          Write-Host "[OK] Old rule removed"
           
           # Allow incoming connection on port 3389 for RDP
+          Write-Host "Adding new RDP-NPS firewall rule..."
           netsh advfirewall firewall add rule name="RDP-NPS" `
-            dir=in action=allow protocol=TCP localport=3389
+            dir=in action=allow protocol=TCP localport=3389 -ErrorAction Stop
+          Write-Host "[OK] Firewall rule added"
 
           # Restart the Remote Desktop service to ensure changes take effect
-          Restart-Service -Name TermService -Force
-          Write-Host "RDP configured and service restarted"
+          Write-Host "Restarting TermService..."
+          Restart-Service -Name TermService -Force -ErrorAction Stop
+          Write-Host "[OK] TermService restarted"
+          Write-Host "[STEP 1 COMPLETE] RDP configured successfully"
 
       - name: Create RDP User with Secure Password
         run: |
+          Write-Host "[STEP 2] Creating RDP User with Secure Password..."
+          
+          Write-Host "Generating secure password..."
           Add-Type -AssemblyName System.Security
           $charSet = @{
               Upper   = [char[]](65..90)      # A-Z
@@ -54,83 +75,121 @@ jobs:
           $rawPassword += $charSet.Special | Get-Random -Count 4
           $password = -join ($rawPassword | Sort-Object { Get-Random })
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          Write-Host "[OK] Password generated (16 characters)"
           
           # Check if user already exists
+          Write-Host "Checking if RDP user exists..."
           if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-              Write-Host "RDP user created"
+              Write-Host "Creating new RDP user..."
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -ErrorAction Stop
+              Write-Host "[OK] RDP user created"
           } else {
-              Set-LocalUser -Name "RDP" -Password $securePass
-              Write-Host "RDP user password updated"
+              Write-Host "RDP user exists, updating password..."
+              Set-LocalUser -Name "RDP" -Password $securePass -ErrorAction Stop
+              Write-Host "[OK] RDP user password updated"
           }
           
+          Write-Host "Adding RDP user to Administrators group..."
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+          Write-Host "[OK] Added to Administrators"
+          
+          Write-Host "Adding RDP user to Remote Desktop Users group..."
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          Write-Host "[OK] Added to Remote Desktop Users"
           
+          Write-Host "Storing password in environment variable..."
           echo "RDP_CREDS=$password" >> $env:GITHUB_ENV
+          Write-Host "[OK] Password saved to RDP_CREDS"
           
+          Write-Host "Verifying user creation..."
           if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
+              Write-Error "[FAILED] User verification failed"
               exit 1
           }
+          Write-Host "[STEP 2 COMPLETE] RDP user created successfully"
 
       - name: Start NPS Client
         run: |
+          Write-Host "[STEP 3] Starting NPS Client..."
+          
           $npcPath = "${{ github.workspace }}\npc.exe"
           $npsServer = "${{ env.NPS_SERVER }}"
           $vkey = "${{ env.NPS_VKEY }}"
           
+          Write-Host "Checking NPC client path: $npcPath"
           if (-not (Test-Path $npcPath)) {
-              Write-Error "NPC client not found at $npcPath"
+              Write-Error "[FAILED] NPC client not found at $npcPath"
               exit 1
           }
+          Write-Host "[OK] NPC client found"
           
-          Write-Host "Starting NPS client..."
+          Write-Host "Verifying NPC executable is accessible..."
+          $npcInfo = Get-Item $npcPath -ErrorAction Stop
+          Write-Host "[OK] File size: $($npcInfo.Length) bytes, Created: $($npcInfo.CreationTime)"
+          
+          Write-Host "Starting NPS client in background..."
           Write-Host "NPS Server: (configured in env)"
+          Write-Host "Command: $npcPath -server=$npsServer -vkey=*** -type=tcp"
           
           # Start NPS client in background
-          $process = Start-Process -FilePath $npcPath `
-            -ArgumentList "-server=$npsServer", "-vkey=$vkey", "-type=tcp" `
-            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\npc.log" -RedirectStandardError "$env:TEMP\npc_error.log"
+          Try {
+              $process = Start-Process -FilePath $npcPath `
+                -ArgumentList "-server=$npsServer", "-vkey=$vkey", "-type=tcp" `
+                -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\npc.log" -RedirectStandardError "$env:TEMP\npc_error.log" -ErrorAction Stop
+              Write-Host "[OK] NPC process started with PID: $($process.Id)"
+          } Catch {
+              Write-Error "[FAILED] Failed to start NPC process: $_"
+              exit 1
+          }
           
           echo "NPC_PID=$($process.Id)" >> $env:GITHUB_ENV
           
           # Wait for NPS client to establish connection
+          Write-Host "Waiting 15 seconds for NPS client to establish connection..."
           Start-Sleep -Seconds 15
           
           # Check if NPC process is running
+          Write-Host "Checking if NPC process is still running..."
           $npcProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
           if ($npcProcess) {
-              Write-Host "NPS client is running (PID: $($npcProcess.Id))"
+              Write-Host "[OK] NPS client is running (PID: $($npcProcess.Id), CPU: $($npcProcess.CPU), Memory: $($npcProcess.WorkingSet / 1MB) MB)"
           } else {
-              Write-Error "NPS client failed to start"
-              Write-Host "Output log:"
-              Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue
-              Write-Host "Error log:"
-              Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue
+              Write-Error "[FAILED] NPC client process has terminated"
+              Write-Host "==================== NPC OUTPUT LOG ===================="
+              Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+              Write-Host "===================== NPC ERROR LOG ====================="
+              Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+              Write-Host "======================================================"
               exit 1
           }
+          Write-Host "[STEP 3 COMPLETE] NPS client started successfully"
 
       - name: Verify RDP Service
         run: |
+          Write-Host "[STEP 4] Verifying RDP Service..."
+          
           # Test if RDP service is running and listening
-          $rdpService = Get-Service -Name "TermService"
+          Write-Host "Checking TermService status..."
+          $rdpService = Get-Service -Name "TermService" -ErrorAction Stop
           Write-Host "RDP Service Status: $($rdpService.Status)"
           
           if ($rdpService.Status -ne "Running") {
-              Write-Error "RDP service is not running"
+              Write-Error "[FAILED] RDP service is not running"
               exit 1
           }
+          Write-Host "[OK] RDP service is running"
           
           # Check if RDP port is listening
+          Write-Host "Checking if RDP port 3389 is listening..."
           $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
           if ($rdpPort) {
-              Write-Host "RDP port 3389 is listening"
+              Write-Host "[OK] RDP port 3389 is listening"
+              Write-Host "Connection count: $($rdpPort | Measure-Object | Select-Object -ExpandProperty Count)"
           } else {
-              Write-Host "Warning: RDP port 3389 not detected"
+              Write-Host "[WARNING] RDP port 3389 not currently listening (may listen after connection attempt)"
           }
           
-          Write-Host "RDP verification completed successfully"
+          Write-Host "[STEP 4 COMPLETE] RDP verification completed successfully"
 
       - name: Maintain Connection
         run: |
@@ -152,14 +211,38 @@ jobs:
           
           # Keep runner active indefinitely (or until manually cancelled)
           $npcPid = $env:NPC_PID
+          Write-Host "[STEP 5] Monitoring connection (NPC PID: $npcPid)..."
+          
+          $loopCount = 0
           while ($true) {
+              $loopCount++
+              $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+              
               # Check if NPC process is still running
               $npcProcess = Get-Process -Id $npcPid -ErrorAction SilentlyContinue
               if (-not $npcProcess) {
-                  Write-Host "[$(Get-Date)] ERROR: NPC process (PID:$npcPid) terminated! Exiting."
+                  Write-Error "[$timestamp] [FAILED] NPC process (PID:$npcPid) has terminated!"
+                  Write-Host "Output log from NPC:"
+                  Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue | Tail -20 | ForEach-Object { Write-Host $_ }
+                  Write-Host "Error log from NPC:"
+                  Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue | Tail -20 | ForEach-Object { Write-Host $_ }
                   exit 1
               }
               
-              Write-Host "[$(Get-Date)] Connection Active - NPS Tunnel OK"
+              # Get RDP service status
+              $rdpService = Get-Service -Name "TermService" -ErrorAction SilentlyContinue
+              $rdpStatus = $rdpService.Status
+              
+              # Get process info
+              $cpu = [Math]::Round($npcProcess.CPU, 2)
+              $mem = [Math]::Round($npcProcess.WorkingSet / 1MB, 2)
+              
+              Write-Host "[$timestamp] [OK] Loop #$loopCount - NPC: Running (CPU: $cpu%, Mem: $mem MB) | RDP: $rdpStatus"
+              
+              if ($loopCount -eq 1 -or $loopCount % 10 -eq 0) {
+                  Write-Host "  - Recent NPC output:"
+                  Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue | Tail -3 | ForEach-Object { Write-Host "    $_" }
+              }
+              
               Start-Sleep -Seconds 60
           }
