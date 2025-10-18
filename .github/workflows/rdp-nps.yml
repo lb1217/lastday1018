@@ -136,44 +136,47 @@ jobs:
           Write-Host "VKey: (configured via secrets)"
           Write-Host "Type: tcp"
           
-          # Start NPS client in background
+          # Start NPS client in background with output redirection
+          Write-Host "Preparing NPC process..."
+          $logFile = "$env:TEMP\npc_combined.log"
+          
           Try {
+              # Start process and capture output
               $process = Start-Process -FilePath $npcPath `
                 -ArgumentList "-server=$npsServer", "-vkey=$vkey", "-type=tcp" `
-                -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\npc.log" -RedirectStandardError "$env:TEMP\npc_error.log" -ErrorAction Stop
+                -WindowStyle Hidden -PassThru -ErrorAction Stop
               Write-Host "[OK] NPC process started with PID: $($process.Id)"
+              echo "NPC_PID=$($process.Id)" >> $env:GITHUB_ENV
           } Catch {
               Write-Error "[FAILED] Failed to start NPC process: $_"
               exit 1
           }
           
-          echo "NPC_PID=$($process.Id)" >> $env:GITHUB_ENV
-          
           # Wait for NPS client to establish connection
-          Write-Host "Waiting 15 seconds for NPS client to establish connection..."
-          Start-Sleep -Seconds 15
+          Write-Host "Waiting 20 seconds for NPS client to establish connection..."
+          $waited = 0
+          while ($waited -lt 20) {
+              Start-Sleep -Seconds 2
+              $waited += 2
+              $npcProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+              if ($npcProcess) {
+                  $mem = [Math]::Round($npcProcess.WorkingSet / 1MB, 2)
+                  Write-Host "  [$waited/20s] Process alive (Mem: $mem MB)"
+              } else {
+                  Write-Error "[FAILED] NPC process terminated before connection established"
+                  Write-Host "Process exit code: $($process.ExitCode)"
+                  exit 1
+              }
+          }
           
-          # Check if NPC process is running
-          Write-Host "Checking if NPC process is still running..."
+          # Final check
+          Write-Host "Final verification of NPC process..."
           $npcProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
           if ($npcProcess) {
               Write-Host "[OK] NPS client is running (PID: $($npcProcess.Id), CPU: $($npcProcess.CPU), Memory: $($npcProcess.WorkingSet / 1MB) MB)"
           } else {
-              Write-Error "[FAILED] NPC client process has terminated immediately"
-              Write-Host "==================== NPC OUTPUT LOG ===================="
-              if (Test-Path "$env:TEMP\npc.log") {
-                  Get-Content "$env:TEMP\npc.log" | ForEach-Object { Write-Host $_ }
-              } else {
-                  Write-Host "(no output log file)"
-              }
-              Write-Host "===================== NPC ERROR LOG ====================="
-              if (Test-Path "$env:TEMP\npc_error.log") {
-                  Get-Content "$env:TEMP\npc_error.log" | ForEach-Object { Write-Host $_ }
-              } else {
-                  Write-Host "(no error log file)"
-              }
-              Write-Host "======================================================"
-              Write-Host "Troubleshooting: Verify NPS_SERVER and NPS_VKEY secrets are set correctly"
+              Write-Error "[FAILED] NPC client process exited"
+              Write-Host "Process exit code: $($process.ExitCode)"
               exit 1
           }
           Write-Host "[STEP 3 COMPLETE] NPS client started successfully"
@@ -235,11 +238,28 @@ jobs:
               # Check if NPC process is still running
               $npcProcess = Get-Process -Id $npcPid -ErrorAction SilentlyContinue
               if (-not $npcProcess) {
-                  Write-Error "[$timestamp] [FAILED] NPC process (PID:$npcPid) has terminated!"
-                  Write-Host "Output log from NPC:"
-                  Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue | Tail -20 | ForEach-Object { Write-Host $_ }
-                  Write-Host "Error log from NPC:"
-                  Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue | Tail -20 | ForEach-Object { Write-Host $_ }
+                  Write-Error "[$timestamp] [CRITICAL] NPC process (PID:$npcPid) has terminated!"
+                  
+                  Write-Host "=" * 60
+                  Write-Host "DIAGNOSTIC INFO:"
+                  Write-Host "=" * 60
+                  
+                  # Check for any NPC processes
+                  Write-Host "Searching for NPC processes:"
+                  $npcProcs = Get-Process | Where-Object { $_.ProcessName -like "*npc*" }
+                  if ($npcProcs) {
+                      $npcProcs | ForEach-Object { Write-Host "  Found: $($_.ProcessName) (PID: $($_.Id))" }
+                  } else {
+                      Write-Host "  No NPC processes found"
+                  }
+                  
+                  # Check temp directory for logs
+                  Write-Host "`nNPC related files in temp:"
+                  Get-ChildItem "$env:TEMP" -Filter "npc*" -ErrorAction SilentlyContinue | ForEach-Object {
+                      Write-Host "  File: $($_.Name) ($($_.Length) bytes, Modified: $($_.LastWriteTime))"
+                  }
+                  
+                  Write-Host "=" * 60
                   exit 1
               }
               
