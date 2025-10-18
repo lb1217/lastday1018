@@ -1,0 +1,168 @@
+name: RDP-NPS-Tunnel
+
+on:
+  workflow_dispatch:
+
+env:
+  NPS_SERVER: "nps.aitmc.cn:50001"
+  NPS_VKEY: "yongning0617win"
+
+jobs:
+  secure-rdp-nps:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure Core RDP Settings
+        run: |
+          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+
+          # Remove any existing rule with the same name to avoid duplication
+          netsh advfirewall firewall delete rule name="RDP-NPS" 2>$null
+          
+          # Allow incoming connection on port 3389 for RDP
+          netsh advfirewall firewall add rule name="RDP-NPS" `
+            dir=in action=allow protocol=TCP localport=3389
+
+          # Restart the Remote Desktop service to ensure changes take effect
+          Restart-Service -Name TermService -Force
+          Write-Host "RDP configured and service restarted"
+
+      - name: Create RDP User with Secure Password
+        run: |
+          Add-Type -AssemblyName System.Security
+          $charSet = @{
+              Upper   = [char[]](65..90)      # A-Z
+              Lower   = [char[]](97..122)     # a-z
+              Number  = [char[]](48..57)      # 0-9
+              Special = ([char[]](33..47) + [char[]](58..64) +
+                         [char[]](91..96) + [char[]](123..126)) # Special characters
+          }
+          $rawPassword = @()
+          $rawPassword += $charSet.Upper | Get-Random -Count 4
+          $rawPassword += $charSet.Lower | Get-Random -Count 4
+          $rawPassword += $charSet.Number | Get-Random -Count 4
+          $rawPassword += $charSet.Special | Get-Random -Count 4
+          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          
+          # Check if user already exists
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+              Write-Host "RDP user created"
+          } else {
+              Set-LocalUser -Name "RDP" -Password $securePass
+              Write-Host "RDP user password updated"
+          }
+          
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          
+          echo "RDP_CREDS=$password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
+
+      - name: Start NPS Client
+        run: |
+          $npcPath = "${{ github.workspace }}\npc.exe"
+          $npsServer = "${{ env.NPS_SERVER }}"
+          $vkey = "${{ env.NPS_VKEY }}"
+          
+          if (-not (Test-Path $npcPath)) {
+              Write-Error "NPC client not found at $npcPath"
+              exit 1
+          }
+          
+          Write-Host "Starting NPS client..."
+          Write-Host "NPS Server: $npsServer"
+          Write-Host "VKey: $vkey"
+          
+          # Start NPS client in background
+          $process = Start-Process -FilePath $npcPath `
+            -ArgumentList "-server=$npsServer", "-vkey=$vkey", "-type=tcp" `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\npc.log" -RedirectStandardError "$env:TEMP\npc_error.log"
+          
+          echo "NPC_PID=$($process.Id)" >> $env:GITHUB_ENV
+          
+          # Wait for NPS client to establish connection
+          Start-Sleep -Seconds 15
+          
+          # Check if NPC process is running
+          $npcProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+          if ($npcProcess) {
+              Write-Host "NPS client is running (PID: $($npcProcess.Id))"
+          } else {
+              Write-Error "NPS client failed to start"
+              Write-Host "Output log:"
+              Get-Content "$env:TEMP\npc.log" -ErrorAction SilentlyContinue
+              Write-Host "Error log:"
+              Get-Content "$env:TEMP\npc_error.log" -ErrorAction SilentlyContinue
+              exit 1
+          }
+
+      - name: Verify RDP Service
+        run: |
+          # Test if RDP service is running and listening
+          $rdpService = Get-Service -Name "TermService"
+          Write-Host "RDP Service Status: $($rdpService.Status)"
+          
+          if ($rdpService.Status -ne "Running") {
+              Write-Error "RDP service is not running"
+              exit 1
+          }
+          
+          # Check if RDP port is listening
+          $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+          if ($rdpPort) {
+              Write-Host "RDP port 3389 is listening"
+          } else {
+              Write-Host "Warning: RDP port 3389 not detected"
+          }
+          
+          Write-Host "RDP verification completed successfully"
+
+      - name: Maintain Connection
+        run: |
+          Write-Host "`n=========================================="
+          Write-Host "RDP-NPS TUNNEL ACTIVE"
+          Write-Host "=========================================="
+          Write-Host "NPS Server: ${{ env.NPS_SERVER }}"
+          Write-Host "VKey: ${{ env.NPS_VKEY }}"
+          Write-Host "Local RDP Port: 3389"
+          Write-Host "`nRDP Credentials:"
+          Write-Host "Username: RDP"
+          Write-Host "Password: $env:RDP_CREDS"
+          Write-Host "=========================================="
+          Write-Host "Access via NPS Web UI:"
+          Write-Host "1. Log in to NPS Web UI"
+          Write-Host "2. Find the tunnel with VKey: ${{ env.NPS_VKEY }}"
+          Write-Host "3. Get the mapped RDP port"
+          Write-Host "4. Connect: mstsc /v:NPS_IP:MAPPED_PORT"
+          Write-Host "=========================================="
+          Write-Host "`nRunner will stay active until cancelled`n"
+          
+          # Keep runner active indefinitely (or until manually cancelled)
+          $npcPid = $env:NPC_PID
+          while ($true) {
+              # Check if NPC process is still running
+              $npcProcess = Get-Process -Id $npcPid -ErrorAction SilentlyContinue
+              if (-not $npcProcess) {
+                  Write-Host "[$(Get-Date)] ERROR: NPC process (PID:$npcPid) terminated! Exiting."
+                  exit 1
+              }
+              
+              Write-Host "[$(Get-Date)] Connection Active - NPS Tunnel OK"
+              Start-Sleep -Seconds 60
+          }
