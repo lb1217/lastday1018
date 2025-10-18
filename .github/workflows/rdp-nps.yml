@@ -45,9 +45,13 @@ jobs:
           
           # Allow incoming connection on port 3389 for RDP
           Write-Host "Adding new RDP-NPS firewall rule..."
-          netsh advfirewall firewall add rule name="RDP-NPS" `
-            dir=in action=allow protocol=TCP localport=3389 -ErrorAction Stop
-          Write-Host "[OK] Firewall rule added"
+          netsh advfirewall firewall add rule name="RDP-NPS" dir=in action=allow protocol=TCP localport=3389
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "[OK] Firewall rule added"
+          } else {
+              Write-Error "[FAILED] Firewall rule failed with exit code $LASTEXITCODE"
+              exit 1
+          }
 
           # Restart the Remote Desktop service to ensure changes take effect
           Write-Host "Restarting TermService..."
