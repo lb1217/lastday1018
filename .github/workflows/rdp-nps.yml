@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  NPS_SERVER: "nps.aitmc.cn:50001"
-  NPS_VKEY: "yongning0617win"
+  NPS_SERVER: "your.nps.server:port"
+  NPS_VKEY: "your-vkey-here"
 
 jobs:
   secure-rdp-nps:
@@ -86,8 +86,7 @@ jobs:
           }
           
           Write-Host "Starting NPS client..."
-          Write-Host "NPS Server: $npsServer"
-          Write-Host "VKey: $vkey"
+          Write-Host "NPS Server: (configured in env)"
           
           # Start NPS client in background
           $process = Start-Process -FilePath $npcPath `
@@ -138,8 +137,6 @@ jobs:
           Write-Host "`n=========================================="
           Write-Host "RDP-NPS TUNNEL ACTIVE"
           Write-Host "=========================================="
-          Write-Host "NPS Server: ${{ env.NPS_SERVER }}"
-          Write-Host "VKey: ${{ env.NPS_VKEY }}"
           Write-Host "Local RDP Port: 3389"
           Write-Host "`nRDP Credentials:"
           Write-Host "Username: RDP"
@@ -147,7 +144,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host "Access via NPS Web UI:"
           Write-Host "1. Log in to NPS Web UI"
-          Write-Host "2. Find the tunnel with VKey: ${{ env.NPS_VKEY }}"
+          Write-Host "2. Find your configured tunnel"
           Write-Host "3. Get the mapped RDP port"
           Write-Host "4. Connect: mstsc /v:NPS_IP:MAPPED_PORT"
           Write-Host "=========================================="

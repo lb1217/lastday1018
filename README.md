@@ -18,16 +18,18 @@ npswin/
 
 ```yaml
 env:
-  NPS_SERVER: "nps.aitmc.cn:50001"
-  NPS_VKEY: "yongning0617win"
+  NPS_SERVER: "your.nps.server:port"
+  NPS_VKEY: "your-vkey-here"
 ```
 
 ### 修改配置
 
 编辑 `.github/workflows/rdp-nps.yml` 文件中的以下行：
 
-- **NPS_SERVER**: NPS 服务器地址和端口
-- **NPS_VKEY**: 用于连接 NPS 服务器的密钥
+- **NPS_SERVER**: 替换为你的 NPS 服务器地址和端口
+- **NPS_VKEY**: 替换为你的 NPS 虚拟密钥
+
+⚠️ **安全提示**：不要将真实的服务器地址和密钥提交到公开仓库
 
 ## 使用方法
 
@@ -42,15 +44,15 @@ env:
 
 工作流启动后：
 
-1. 查看工作流日志获取 RDP 凭证
+1. 查看工作流日志获取 RDP 凭证（用户名和密码）
 2. 登录 NPS Web UI
-3. 找到 VKey 为 `yongning0617win` 的隧道
+3. 找到你配置的隧道
 4. 获取映射的 RDP 端口号
 5. 使用远程桌面连接：
    ```
    mstsc /v:NPS_服务器_IP:映射端口
    ```
-6. 输入用户名 `RDP` 和生成的密码
+6. 输入用户名 `RDP` 和工作流输出的密码
 
 ## 工作流步骤说明
 
